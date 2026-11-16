@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:17
+    container_name: helix-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: helix_crm
+      POSTGRES_USER: helix
+      POSTGRES_PASSWORD: helix_dev_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - helix_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U helix -d helix_crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: helix-api
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Default: Host=db;Port=5432;Database=helix_crm;Username=helix;Password=helix_dev_password
+      Jwt__Key: ${JWT_KEY:-helix-prod-signing-key-change-me-7f4b2c9e1a8d5f3b6c0e4a2d9f7b1c5e}
+      Cors__Origins__0: http://localhost:${WEB_PORT:-3000}
+      Cookie__Secure: "false"
+    ports:
+      - "${API_PORT:-5080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        API_URL: http://api:8080
+    container_name: helix-web
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:8080
+      NEXT_PUBLIC_API_URL: /api/v1
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - api
+
+volumes:
+  helix_pgdata:
