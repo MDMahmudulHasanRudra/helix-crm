@@ -8,6 +8,7 @@ using HelixCrm.Api.Features.Autonomous;
 using HelixCrm.Api.Features.Config;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -98,6 +99,11 @@ builder.Services.AddCors(options =>
     });
 });
 
+// Trust X-Forwarded-For only from proxies named in configuration. Otherwise every
+// request behind nginx/Caddy/Next shares one IP and therefore one login partition.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    ProxyTrust.Configure(options, builder.Configuration));
+
 // Per-IP limit on sign-in. Account lockout in AuthController handles per-email guessing;
 // this caps spraying across many accounts from one address.
 builder.Services.AddRateLimiter(options =>
@@ -124,6 +130,9 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+
+// Must run before anything reads RemoteIpAddress (rate limiter, logs, audit).
+app.UseForwardedHeaders();
 
 app.UseExceptionHandler(handler => handler.Run(async context =>
 {

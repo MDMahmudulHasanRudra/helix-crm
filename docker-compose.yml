@@ -30,6 +30,8 @@ services:
       Jwt__Key: "${JWT_KEY:-}"
       Cors__Origins__0: http://localhost:${WEB_PORT:-3000}
       Cookie__Secure: "false"
+      Proxy__KnownProxies: ${PROXY_KNOWN_PROXIES:-}
+      Proxy__KnownNetworks: ${PROXY_KNOWN_NETWORKS:-}
     ports:
       - "${API_PORT:-5080}:8080"
     depends_on:

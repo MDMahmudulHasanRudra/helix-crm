@@ -127,6 +127,8 @@ docker-compose.yml   db + api + web
 | `Jwt__Key` | dev key in Development only | JWT signing key — **required in Production**, minimum 32 characters |
 | `Jwt__ExpiryDays` | `7` | Session lifetime |
 | `Cookie__Secure` | `false` | Set `true` behind HTTPS |
+| `Proxy__KnownProxies` | empty | Comma-separated proxy IPs allowed to set `X-Forwarded-For` (required for per-IP limits behind nginx/Caddy) |
+| `Proxy__KnownNetworks` | empty | Comma-separated CIDRs trusted as proxies (for example the Docker network) |
 | `Database__AutoMigrate` | `true` | Apply migrations + seed at startup |
 | `Autonomous__DaemonEnabled` | `true` | Run the autonomous background workers |
 | `Autonomous__SlaIntervalMinutes` | `5` | SLA escalation sweep interval |
@@ -139,6 +141,7 @@ docker-compose.yml   db + api + web
 
 - Passwords are hashed with PBKDF2-SHA256 (120 000 iterations, per-password salt).
 - Sign-in is rate-limited per IP (10 requests/minute) and locks an account for 15 minutes after 5 consecutive failures; successful sign-in resets the counter.
+- Forwarded headers are trusted only from proxies listed in `Proxy__KnownProxies` / `Proxy__KnownNetworks`; without an entry, a reverse proxy collapses every user into one rate-limit bucket. Never trust `X-Forwarded-For` from arbitrary clients.
 - Sessions use a signed JWT delivered as an `httpOnly`, `SameSite=Lax` cookie; the API also accepts `Authorization: Bearer` for integrations. In Production the API will not start with a missing, short, or sample JWT key.
 - Every query is scoped to the signed-in user's organisation through EF Core global query filters; workspace lookups go through a tenant-scoped helper, so IDs alone never grant cross-tenant access.
 - Mutations are role-gated (Admin/Manager/Rep) and every create/update/delete is written to an immutable audit log.
