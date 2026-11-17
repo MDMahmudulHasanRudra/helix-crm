@@ -31,6 +31,9 @@ public class HelixDbContext(DbContextOptions<HelixDbContext> options, ITenantPro
     public DbSet<CannedResponse> CannedResponses => Set<CannedResponse>();
     public DbSet<AutomationRule> AutomationRules => Set<AutomationRule>();
     public DbSet<DuplicateCandidate> DuplicateCandidates => Set<DuplicateCandidate>();
+    public DbSet<EmailAccount> EmailAccounts => Set<EmailAccount>();
+    public DbSet<EmailMessage> EmailMessages => Set<EmailMessage>();
+    public DbSet<EmailSuppression> EmailSuppressions => Set<EmailSuppression>();
     public DbSet<CustomFieldDefinition> CustomFieldDefinitions => Set<CustomFieldDefinition>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -147,6 +150,7 @@ public class HelixDbContext(DbContextOptions<HelixDbContext> options, ITenantPro
             e.Property(x => x.Status).HasMaxLength(20);
             e.HasIndex(x => new { x.OrganizationId, x.RelatedType, x.RelatedId });
             e.HasIndex(x => new { x.OrganizationId, x.OwnerId, x.Status });
+            e.HasIndex(x => new { x.OrganizationId, x.EmailMessageId });
             e.HasOne(x => x.Owner).WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.SetNull);
             e.HasQueryFilter(x => x.OrganizationId == _tenant.OrganizationId && !x.IsDeleted);
         });
@@ -283,6 +287,64 @@ public class HelixDbContext(DbContextOptions<HelixDbContext> options, ITenantPro
             e.HasIndex(x => new { x.OrganizationId, x.EntityType, x.PrimaryId, x.DuplicateId });
             e.HasQueryFilter(x => x.OrganizationId == _tenant.OrganizationId && !x.IsDeleted);
         });
+
+        b.Entity<EmailAccount>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(120);
+            e.Property(x => x.FromName).HasMaxLength(120);
+            e.Property(x => x.FromAddress).HasMaxLength(254);
+            e.Property(x => x.ReplyToAddress).HasMaxLength(254);
+            e.Property(x => x.SmtpHost).HasMaxLength(200);
+            e.Property(x => x.SmtpUsername).HasMaxLength(254);
+            e.Property(x => x.SmtpSecurity).HasMaxLength(20);
+            e.Property(x => x.SmtpPasswordCipher).HasMaxLength(2000);
+            e.Property(x => x.ImapHost).HasMaxLength(200);
+            e.Property(x => x.ImapUsername).HasMaxLength(254);
+            e.Property(x => x.ImapSecurity).HasMaxLength(20);
+            e.Property(x => x.ImapPasswordCipher).HasMaxLength(2000);
+            e.Property(x => x.ImapFolder).HasMaxLength(200);
+            e.Property(x => x.LastError).HasMaxLength(1000);
+            e.HasIndex(x => new { x.OrganizationId, x.IsActive });
+            e.HasQueryFilter(x => x.OrganizationId == _tenant.OrganizationId && !x.IsDeleted);
+        });
+
+        b.Entity<EmailMessage>(e =>
+        {
+            e.Property(x => x.Direction).HasMaxLength(12);
+            e.Property(x => x.Status).HasMaxLength(20);
+            e.Property(x => x.FromAddress).HasMaxLength(254);
+            e.Property(x => x.FromName).HasMaxLength(120);
+            e.Property(x => x.ToAddress).HasMaxLength(254);
+            e.Property(x => x.ToName).HasMaxLength(120);
+            e.Property(x => x.Cc).HasMaxLength(1000);
+            e.Property(x => x.Bcc).HasMaxLength(1000);
+            e.Property(x => x.Subject).HasMaxLength(400);
+            e.Property(x => x.MessageId).HasMaxLength(400);
+            e.Property(x => x.InReplyTo).HasMaxLength(400);
+            e.Property(x => x.References).HasMaxLength(4000);
+            e.Property(x => x.RelatedType).HasMaxLength(30);
+            e.Property(x => x.FailureReason).HasMaxLength(1000);
+            e.Property(x => x.ImapFolder).HasMaxLength(200);
+            e.Property(x => x.ImapUid).HasMaxLength(40);
+            e.HasIndex(x => new { x.OrganizationId, x.Direction, x.Status });
+            e.HasIndex(x => new { x.OrganizationId, x.RelatedType, x.RelatedId });
+            e.HasIndex(x => new { x.OrganizationId, x.NextAttemptAt });
+            e.HasIndex(x => new { x.OrganizationId, x.MessageId }).IsUnique()
+                .HasFilter("\"MessageId\" IS NOT NULL");
+            e.HasIndex(x => new { x.OrganizationId, x.EmailAccountId, x.ImapFolder, x.ImapUid }).IsUnique()
+                .HasFilter("\"ImapUid\" IS NOT NULL");
+            e.HasOne(x => x.EmailAccount).WithMany().HasForeignKey(x => x.EmailAccountId).OnDelete(DeleteBehavior.SetNull);
+            e.HasQueryFilter(x => x.OrganizationId == _tenant.OrganizationId && !x.IsDeleted);
+        });
+
+        b.Entity<EmailSuppression>(e =>
+        {
+            e.Property(x => x.Email).HasMaxLength(254);
+            e.Property(x => x.Reason).HasMaxLength(30);
+            e.Property(x => x.Note).HasMaxLength(500);
+            e.HasIndex(x => new { x.OrganizationId, x.Email }).IsUnique();
+            e.HasQueryFilter(x => x.OrganizationId == _tenant.OrganizationId && !x.IsDeleted);
+        });
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
@@ -308,7 +370,8 @@ public class HelixDbContext(DbContextOptions<HelixDbContext> options, ITenantPro
         var auditEntries = AuditEnabled
             ? ChangeTracker.Entries<OrgEntity>()
                 .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
-                .Where(e => e.Entity is not AuditLog and not Notification and not QuoteLine and not Stage and not DuplicateCandidate)
+                .Where(e => e.Entity is not AuditLog and not Notification and not QuoteLine and not Stage
+                    and not DuplicateCandidate and not EmailMessage)
                 .Select(e => BuildAudit(e, now))
                 .Where(x => x is not null)
                 .Cast<AuditLog>()
@@ -338,7 +401,8 @@ public class HelixDbContext(DbContextOptions<HelixDbContext> options, ITenantPro
         {
             foreach (var prop in entry.Properties.Where(p => p.IsModified))
             {
-                if (prop.Metadata.Name is "UpdatedAt" or "UpdatedById" or "IsDeleted" or "PasswordHash" or "CustomDataJson" or "TagsJson") continue;
+                if (prop.Metadata.Name is "UpdatedAt" or "UpdatedById" or "IsDeleted" or "PasswordHash" or "CustomDataJson" or "TagsJson"
+                    or "SmtpPasswordCipher" or "ImapPasswordCipher") continue;
                 changes[prop.Metadata.Name] = new[] { prop.OriginalValue?.ToString(), prop.CurrentValue?.ToString() };
             }
             // A soft delete only flips IsDeleted, so give the entry a readable subject.
@@ -378,6 +442,8 @@ public class HelixDbContext(DbContextOptions<HelixDbContext> options, ITenantPro
         Activity a => a.Subject,
         CustomFieldDefinition f => f.Label,
         User u => u.FullName,
+        EmailAccount e => e.Name,
+        EmailSuppression s => s.Email,
         _ => entity.GetType().Name
     };
 }

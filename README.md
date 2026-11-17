@@ -12,8 +12,9 @@ Helix CRM is a complete, self-hosted CRM workspace built with **.NET 10**, **Nex
 | Contacts | Directory, account roll-up, primary contact, activity history, per-contact deals and tickets |
 | Leads | Table and drag-and-drop kanban by status, explainable scoring with factor breakdown, auto-routing to the least-loaded rep, qualification notes, one-click conversion to account + contact + deal |
 | Deals | Configurable pipelines, kanban and table views, stage stepper with probability, amount/close-date tracking, quotes, activity and audit |
-| Activities | Unified timeline of tasks, calls, meetings, manually logged emails, notes and replies, due-date buckets, complete/reopen |
-| Support inbox | Ticket inbox with table and board layouts, server-side SLA breach detection and auto-escalation, priority/channel/assignee filters, threaded conversation with public replies and internal notes (email delivery is not wired yet) |
+| Activities | Unified timeline of tasks, calls, meetings, emails, notes and replies, due-date buckets, complete/reopen |
+| Support inbox | Ticket inbox with table and board layouts, server-side SLA breach detection and auto-escalation, priority/channel/assignee filters, threaded conversation with emailed replies and internal notes |
+| Email | Per-workspace SMTP + IMAP mailboxes, durable outbox with retry/backoff and delivery status, Message-ID threading, inbound polling that matches headers then `[#TCK-…]` subject tokens, an unmatched-mail review queue, daily send cap and suppression list |
 | Autonomous | Background daemon that scores/routes leads, flags stalled deals with health indexes and follow-up tasks, escalates SLA breaches, decays data freshness, and detects/merges duplicate accounts and contacts — configurable per workspace |
 | Revenue | Product catalogue, quotes with line items, product picker, per-line and order discounts, tax, status workflow, printable document view |
 | Analytics | Executive dashboard plus reports: revenue trend, pipeline by stage, team leaderboard, top accounts, lead funnel and source mix, support volume, activity mix |
@@ -75,7 +76,7 @@ The frontend proxies `/api/v1/*` to `http://localhost:5080` (override with `API_
 
 ```bash
 dotnet build backend/src/HelixCrm.Api          # compile the API
-dotnet test backend/tests/HelixCrm.Tests       # unit tests (58)
+dotnet test backend/tests/HelixCrm.Tests       # unit tests (82)
 dotnet ef migrations add <Name> --project backend/src/HelixCrm.Api
 powershell -File scripts/smoke.ps1             # full API smoke test (auth, CRUD, exports, autonomous)
 cd frontend && npm run build                   # production build
@@ -92,9 +93,21 @@ export HELIX_TEST_POSTGRES="Host=localhost;Port=5433;Database=helix_crm;Username
 dotnet test backend/tests/HelixCrm.IntegrationTests
 ```
 
-Each run creates a throwaway database (`helix_it_*`), applies migrations, boots the API with `WebApplicationFactory`, and covers tenant isolation, duplicate merge and lead conversion. Without `HELIX_TEST_POSTGRES` those five tests are reported as skipped, not passed.
+Each run creates a throwaway database (`helix_it_*`), applies migrations, boots the API with `WebApplicationFactory`, and covers tenant isolation, duplicate merge, lead conversion and the email layer (encrypted credentials, ticket reply threading, suppression and inbound review). Without `HELIX_TEST_POSTGRES` those nine tests are reported as skipped, not passed.
 
 > When running EF Core design-time commands set `Database__AutoMigrate=false` so the running app does not race the tooling.
+
+## Email setup
+
+Add a mailbox in **Settings → Email → Mailboxes**. Helix stores the SMTP and IMAP connection details, encrypts both passwords with ASP.NET DataProtection, and never returns a password to the browser. Use **Test connection** to verify both directions before relying on it.
+
+- **Outbound.** Ticket replies, quote sends and ad-hoc email from a record go into `EmailMessages` as `Queued`; the dispatcher sends them in the background and records `Sent`, `Failed`, `Suppressed`, attempts and the next retry. A request never blocks on SMTP, and a failure never rolls back the ticket or quote change.
+- **Threading.** Every outbound message gets a stored `Message-ID`. The next message on the same ticket or quote sets `In-Reply-To` and `References`, and ticket subjects also carry a `[#TCK-1001]` token.
+- **Inbound.** The polling worker opens the configured IMAP folder and advances a per-mailbox UID high-water mark. Replies are matched by `In-Reply-To`/`References` first, then by the subject token. Anything unmatched lands in the review queue — Helix does not guess from the sender. Link it to a ticket or dismiss it.
+- **Safety.** `Organization.EmailDailyLimit` (default 300) caps sends per UTC day. Addresses on the suppression list are refused at enqueue and re-checked at send time; hard SMTP rejections add the recipient automatically.
+- **Honest limits.** `Sent` means the SMTP server accepted the message; it is not a delivery or read receipt. There is no open/click tracking and no PDF attachment on quote mail yet. The first IMAP poll only records the current mailbox position, so historical mail is not imported. Delivery webhooks for SES/Mailgun/Brevo are future work; plain SMTP/IMAP is the supported path today.
+
+Keep `DataProtection__KeysPath` on persistent storage. If the key ring is lost, stored mailbox passwords can no longer be decrypted and must be re-entered; the API logs the failure rather than sending with an empty password.
 
 ## Repository layout
 
@@ -106,7 +119,7 @@ backend/
     Domain/          Entities, status constants
     Features/        Auth, Accounts, Contacts, Leads, Deals, Activities,
                      Tickets, Revenue, Dashboard/Reports, Search,
-                     Notifications, Users, Config, Autonomous
+                     Notifications, Users, Config, Autonomous, Email
   tests/HelixCrm.Tests/            Unit tests
   tests/HelixCrm.IntegrationTests/ PostgreSQL integration tests (opt-in via HELIX_TEST_POSTGRES)
 frontend/
@@ -134,6 +147,11 @@ docker-compose.yml   db + api + web
 | `Autonomous__SlaIntervalMinutes` | `5` | SLA escalation sweep interval |
 | `Autonomous__HygieneIntervalMinutes` | `60` | Routing, stagnation and freshness sweep interval |
 | `Autonomous__DuplicateIntervalMinutes` | `360` | Duplicate scan interval |
+| `DataProtection__KeysPath` | `{content root}/.dataprotection-keys` | Key-ring directory for encrypting mailbox passwords; must be writable and persistent |
+| `Email__DispatcherEnabled` | `true` | Run the outbound delivery worker |
+| `Email__InboundEnabled` | `true` | Run the IMAP polling worker |
+| `Email__DispatchIntervalSeconds` | `15` | Outbox poll interval |
+| `Email__InboundIntervalMinutes` | `2` | IMAP poll interval |
 | `Cors__Origins__0` | `http://localhost:3000` | Allowed browser origin |
 | `API_URL` (web) | `http://localhost:5080` | Upstream API for the Next proxy |
 
@@ -145,6 +163,8 @@ docker-compose.yml   db + api + web
 - Sessions use a signed JWT delivered as an `httpOnly`, `SameSite=Lax` cookie; the API also accepts `Authorization: Bearer` for integrations. In Production the API will not start with a missing, short, or sample JWT key.
 - Every query is scoped to the signed-in user's organisation through EF Core global query filters; workspace lookups go through a tenant-scoped helper, so IDs alone never grant cross-tenant access.
 - Mutations are role-gated (Admin/Manager/Rep) and every create/update/delete is written to an immutable audit log.
+- Mailbox passwords are encrypted at rest with a DataProtection key ring; audit entries exclude the ciphertext. A lost key ring forces password re-entry instead of sending with an empty password.
+- Outbound mail is queued, capped per workspace per day, and checked against a suppression list at both enqueue and send time. Hard bounces are suppressed automatically.
 - Records are soft-deleted, so exports and dashboards cannot resurrect removed data.
 
 ## License

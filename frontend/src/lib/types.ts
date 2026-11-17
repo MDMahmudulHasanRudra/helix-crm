@@ -77,6 +77,7 @@ export interface Activity {
   outcome?: string | null;
   createdAt: string;
   relatedName?: string | null;
+  emailStatus?: string | null;
 }
 
 export interface AccountListItem {
@@ -745,4 +746,77 @@ export interface MergeResult {
   primaryName: string;
   relinkedRecords: number;
   message: string;
+}
+
+export interface EmailAccount {
+  id: string;
+  name: string;
+  fromName: string;
+  fromAddress: string;
+  replyToAddress?: string | null;
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecurity: string;
+  smtpUsername: string;
+  hasSmtpPassword: boolean;
+  imapHost: string;
+  imapPort: number;
+  imapSecurity: string;
+  imapUsername: string;
+  hasImapPassword: boolean;
+  imapFolder: string;
+  imapEnabled: boolean;
+  isActive: boolean;
+  isDefault: boolean;
+  lastVerifiedAt?: string | null;
+  lastError?: string | null;
+  lastImapSyncAt?: string | null;
+  lastImapUid?: number | null;
+}
+
+export interface EmailStatusSummary {
+  configured: boolean;
+  accounts: number;
+  defaultAddress?: string | null;
+  imapEnabled: boolean;
+  dailyLimit: number;
+  sentToday: number;
+  queued: number;
+  failed: number;
+  review: number;
+  lastSyncAt?: string | null;
+}
+
+export interface EmailMessage {
+  id: string;
+  direction: string;
+  status: string;
+  fromAddress: string;
+  fromName: string;
+  toAddress: string;
+  toName: string;
+  subject: string;
+  preview?: string | null;
+  messageId?: string | null;
+  inReplyTo?: string | null;
+  relatedType?: string | null;
+  relatedId?: string | null;
+  relatedName?: string | null;
+  contactId?: string | null;
+  attempts: number;
+  nextAttemptAt?: string | null;
+  sentAt?: string | null;
+  receivedAt?: string | null;
+  failureReason?: string | null;
+  needsReview: boolean;
+  hasActivity: boolean;
+  createdAt: string;
+}
+
+export interface EmailSuppression {
+  id: string;
+  email: string;
+  reason: string;
+  note?: string | null;
+  createdAt: string;
 }

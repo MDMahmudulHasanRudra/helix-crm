@@ -48,6 +48,9 @@ In non-Development environments `JwtKeyGuard` fails startup when `Jwt:Key` is mi
 | `AuditLog` | Actor, action, entity, changed fields (JSON) |
 | `Notification` | Per-user, read/unread |
 | `DuplicateCandidate` | Reviewable account/contact duplicate pair with similarity score, reason and status |
+| `EmailAccount` | Per-organisation SMTP + IMAP mailbox; passwords stored as DataProtection ciphertext, IMAP UID high-water mark |
+| `EmailMessage` | Outbound queue row or inbound received copy; direction, status, RFC 5322 threading headers, related record, review flag |
+| `EmailSuppression` | Per-organisation block list (unsubscribe, bounce, complaint, manual) checked at enqueue and send |
 
 Autonomous engines add state to existing entities: organisations carry the engine thresholds; leads carry a score breakdown and routing state; deals carry `LastStageMovedAt`, health/stall flags and a lost reason; tickets carry a server-side breach flag and escalation level; accounts and contacts carry freshness/duplicate flags and enrichment JSON.
 
@@ -66,12 +69,23 @@ Every entity inherits `OrgEntity`: `Id`, `OrganizationId`, `CreatedAt`, `Updated
 `HelixDbContext.SaveChangesAsync` wraps every save:
 
 1. Stamp `CreatedAt`/`UpdatedAt` (UTC) and `CreatedById`/`UpdatedById`.
-2. Build audit entries for added, modified and soft-deleted `OrgEntity` rows (excluding audit logs, notifications, quote lines and stages). Soft deletes always record the record's display name.
+2. Build audit entries for added, modified and soft-deleted `OrgEntity` rows (excluding audit logs, notifications, quote lines, stages, duplicate candidates and email messages). Soft deletes always record the record's display name. Mailbox ciphertext is excluded from audit diffs.
 3. Persist everything in the same transaction.
 
 Deletes set `IsDeleted = true`; the query filter hides the row while history remains available for auditing. Deleting a pipeline also soft-deletes its stages.
 
-## 5. Autonomous engines
+## 5. Email delivery
+
+Email runs through one seam, `IEmailTransport`, implemented today by MailKit over plain SMTP/IMAP. Provider adapters (SES, Mailgun, Brevo) can replace that implementation without touching the rest of the pipeline.
+
+- **Enqueue.** `EmailOutbox` validates recipients, checks the suppression list, resolves the default or requested `EmailAccount`, assigns a `Message-ID`, adds `In-Reply-To`/`References` from earlier messages on the same related record and appends the `[#TCK-…]` token to ticket subjects. It writes `EmailMessages` as `Queued` and returns; the request thread never opens an SMTP connection.
+- **Dispatch.** `EmailDispatcher` is a hosted service that runs `EmailDispatchService` per organisation scope every 15 seconds. It enforces `Organization.EmailDailyLimit`, marks rows `Sending`, sends, then records `Sent` or schedules a retry with exponential backoff. Hard SMTP rejections fail immediately and add the recipient to the suppression list. A stale `Sending` row is picked up again after ten minutes so a crash cannot strand mail.
+- **Inbound.** `InboundEmailDaemon` polls each active mailbox every two minutes. `FetchAsync` uses the stored UID high-water mark (the first poll only records the current position), and `InboundEmailService` deduplicates by `Message-ID` and mailbox UID. It resolves the ticket by `In-Reply-To`/`References` first, then the subject token. Matched mail becomes a conversation activity; unmatched mail is stored with `NeedsReview` and can be linked to a ticket or dismissed.
+- **Secrets.** `SecretProtector` wraps DataProtection with a persisted key ring (`DataProtection:KeysPath`). A missing key fails closed: the send is recorded as failed and the mailbox asks for the password again instead of authenticating with an empty secret.
+
+The frontend mirrors those states honestly: ticket conversations show `Queued`/`Sent`/`Failed` per email activity, quote sends are queued rather than claimed as delivered, and Settings → Email exposes mailboxes, the outbox, the review queue and suppressions.
+
+## 6. Autonomous engines
 
 The self-driving layer lives in `Features/Autonomous/` and runs both inline (on writes) and in the background.
 
@@ -96,7 +110,7 @@ Endpoints (Admin/Manager for mutations):
 | `POST /duplicates/{id}/merge` | Merge a pair |
 | `POST /duplicates/{id}/dismiss` | Dismiss a suggestion |
 
-## 6. API conventions
+## 7. API conventions
 
 - Base path: `/api/v1`.
 - JSON is camelCase; `DateTime` inputs are normalised to UTC by `UtcDateTimeConverter` before reaching Npgsql, so clients may send `Z`, offsets, or offset-less timestamps.
@@ -106,7 +120,7 @@ Endpoints (Admin/Manager for mutations):
 - CSV exports stream `text/csv` with a UTF-8 BOM and RFC 4180 escaping.
 - Role gates: products, pipelines, custom fields → Admin/Manager. User mutations and organisation settings → Admin. Everything else is available to any authenticated member.
 
-## 7. Frontend architecture
+## 8. Frontend architecture
 
 - **Shell:** sidebar + topbar, workspace switcher, notification popover, user menu, ⌘K command palette backed by `/search`.
 - **Data layer:** `src/lib/api.ts` contains the fetcher and typed SWR hooks. Keys are relative paths such as `/deals?status=Open`; the fetcher prepends `/api/v1`. Mutations call the API then `mutate` the relevant keys.
@@ -115,7 +129,7 @@ Endpoints (Admin/Manager for mutations):
 - **Caching:** SWR keeps lists warm across navigation; mutations revalidate only the affected resources. `cacheComponents` and `partialPrefetching` are enabled in Next.
 - **Forms:** controlled dialogs with inline validation, optimistic-feeling toasts via `sonner`, and server errors surfaced as the API's `message`.
 
-## 8. Operational notes
+## 9. Operational notes
 
 - `Database:AutoMigrate=true` applies migrations and seeds the demo workspace only when the database is empty.
 - The seeder preserves historical timestamps so dashboards show a realistic 12-month trend.

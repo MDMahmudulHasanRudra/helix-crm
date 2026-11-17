@@ -18,6 +18,10 @@ import type {
   DealDetail,
   DealListItem,
   DuplicateCandidate,
+  EmailAccount,
+  EmailMessage,
+  EmailStatusSummary,
+  EmailSuppression,
   InvoiceDetail,
   InvoiceListItem,
   InvoiceSummary,
@@ -200,6 +204,26 @@ export function useCannedResponses(params: Record<string, string | number | unde
 
 export function useAutomations() {
   return useResource<AutomationRule[]>("/automations");
+}
+
+export function useEmailAccounts() {
+  return useResource<EmailAccount[]>("/email/accounts");
+}
+
+export function useEmailStatus() {
+  return useResource<EmailStatusSummary>("/email/status", { refreshInterval: 60_000 });
+}
+
+export function useEmailOutbox(params: Record<string, string | number | undefined | null> = {}) {
+  return useResource<Paged<EmailMessage>>(`/email/outbox${query(params)}`);
+}
+
+export function useInboundEmail(params: Record<string, string | number | boolean | undefined | null> = {}) {
+  return useResource<Paged<EmailMessage>>(`/email/inbound${query(params as Record<string, string | number | undefined | null>)}`);
+}
+
+export function useEmailSuppressions(params: Record<string, string | number | undefined | null> = {}) {
+  return useResource<Paged<EmailSuppression>>(`/email/suppressions${query(params)}`);
 }
 
 export function useCustomFields(entityType?: string) {

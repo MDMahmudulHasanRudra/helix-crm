@@ -6,7 +6,9 @@ using HelixCrm.Api.Data;
 using HelixCrm.Api.Features.Auth;
 using HelixCrm.Api.Features.Autonomous;
 using HelixCrm.Api.Features.Config;
+using HelixCrm.Api.Features.Email;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
@@ -34,6 +36,24 @@ builder.Services.AddScoped<LeadAutopilot>();
 builder.Services.AddScoped<DuplicateDetectionService>();
 builder.Services.AddScoped<AutonomousMonitor>();
 builder.Services.AddHostedService<AutonomousDaemon>();
+
+// Mailbox passwords are encrypted with DataProtection. Keep the key ring on disk so
+// encrypted credentials survive restarts; losing it only forces passwords to be re-entered.
+var keysPath = builder.Configuration["DataProtection:KeysPath"];
+if (string.IsNullOrWhiteSpace(keysPath))
+    keysPath = Path.Combine(builder.Environment.ContentRootPath, ".dataprotection-keys");
+Directory.CreateDirectory(keysPath);
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(keysPath))
+    .SetApplicationName("HelixCrm");
+
+builder.Services.AddSingleton<SecretProtector>();
+builder.Services.AddSingleton<IEmailTransport, MailKitEmailTransport>();
+builder.Services.AddScoped<EmailOutbox>();
+builder.Services.AddScoped<EmailDispatchService>();
+builder.Services.AddScoped<InboundEmailService>();
+builder.Services.AddHostedService<EmailDispatcher>();
+builder.Services.AddHostedService<InboundEmailDaemon>();
 
 var connectionString = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");

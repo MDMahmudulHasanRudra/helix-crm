@@ -16,6 +16,9 @@ publish/
 .env.local
 .env.*.local
 
+# ASP.NET DataProtection key ring (encrypts mailbox passwords)
+.dataprotection-keys/
+
 # logs
 *.log
 npm-debug.log*

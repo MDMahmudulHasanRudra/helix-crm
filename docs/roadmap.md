@@ -10,13 +10,15 @@ The core CRM loop and the first generation of autonomous revenue operations are 
 - Server-side SLA breach/escalation sweeps with priority raises and assignee notifications.
 - Data-freshness decay and stale flags for accounts and contacts.
 - Per-workspace thresholds, a hosted background daemon and dashboard/settings insight panels.
+- Outbound email through a durable SMTP outbox with retry/backoff, Message-ID threading, a daily cap and suppression checks; ticket replies and quote sends flow through it.
+- Inbound IMAP polling that matches replies by headers then by the `[#TCK-…]` subject token, with an unmatched-mail review queue.
 
 ## Near term
 
 1. **Browser E2E suite** — Playwright coverage of login, record CRUD, kanban moves, ticket replies, quote printing and duplicate merge.
 2. **Bulk actions and import** — CSV import with column mapping, reuse the duplicate matcher for import-time de-duplication, and bulk owner/stage/status updates.
 3. **Saved views** — per-user filters and column layouts for every list.
-4. **Email integration** — send quotes and replies through SMTP, log inbound mail as ticket replies (IMAP or webhook), thread by message-id.
+4. **Provider email adapters** — SES/Mailgun/Brevo transports and delivery webhooks for bounce/complaint events, plus PDF quote attachments. Plain SMTP/IMAP already ships.
 5. **Calendar sync** — read/write activities through Google/Microsoft calendar APIs.
 6. **Notifications that matter** — surface the events the autonomous workers already produce (stalled deal, escalation, duplicate ready, lead auto-routed) in the inbox bell and a scheduled digest.
 
@@ -42,7 +44,7 @@ The core CRM loop and the first generation of autonomous revenue operations are 
 ## Engineering health
 
 - Extend unit coverage around quote maths, lead conversion and import edge cases; autonomous scoring, similarity and SLA escalation are covered today.
-- Add integration tests against a disposable PostgreSQL container, especially for the duplicate merge transaction.
+- Add integration tests against a disposable PostgreSQL container, especially for the duplicate merge transaction and the email pipeline (credentials, threading, suppression and review linking are covered).
 - Add structured request logging, OpenTelemetry traces and a `/metrics` endpoint, including daemon sweep timings.
-- Introduce an outbox pattern for outbound email and webhooks (the autonomous daemon already covers internal scheduled sweeps).
+- Introduce an outbox pattern for webhooks (outbound email and the autonomous sweeps already run through durable background queues).
 - Harden rate limiting, account lockout and audit-log retention.

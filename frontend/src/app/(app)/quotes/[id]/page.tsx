@@ -44,6 +44,7 @@ export default function QuoteDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [converting, setConverting] = useState(false);
+  const [sending, setSending] = useState(false);
 
   if (isLoading && !quote) return <DetailSkeleton />;
 
@@ -73,6 +74,22 @@ export default function QuoteDetailPage() {
       toast.error(error instanceof Error ? error.message : "Unable to update quote");
     } finally {
       setUpdating(false);
+    }
+  }
+
+  async function sendQuote() {
+    setSending(true);
+    try {
+      await mutate(`/quotes/${quote!.id}/send`, "POST", {});
+      await refresh();
+      await globalMutate((key) =>
+        typeof key === "string" && (key.startsWith("/quotes") || key.startsWith("/accounts") || key.startsWith("/deals") || key.startsWith("/reports") || key.startsWith("/email")),
+      );
+      toast.success("Quote queued for email delivery");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to send quote");
+    } finally {
+      setSending(false);
     }
   }
 
@@ -140,9 +157,9 @@ export default function QuoteDetailPage() {
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="size-3.5" /> Print
           </Button>
-          {quote.status === "Draft" ? (
-            <Button variant="outline" size="sm" onClick={() => void setStatus("Sent")} disabled={updating}>
-              <Mail className="size-3.5" /> Mark sent
+          {quote.status === "Draft" || quote.status === "Sent" ? (
+            <Button variant="outline" size="sm" onClick={() => void sendQuote()} loading={sending} disabled={updating}>
+              <Mail className="size-3.5" /> {quote.status === "Draft" ? "Send quote" : "Resend"}
             </Button>
           ) : null}
           {quote.status !== "Accepted" ? (

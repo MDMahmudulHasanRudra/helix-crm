@@ -1,7 +1,9 @@
+using System.Text;
 using HelixCrm.Api.Common;
 using HelixCrm.Api.Data;
 using HelixCrm.Api.Domain;
 using HelixCrm.Api.Features.Config;
+using HelixCrm.Api.Features.Email;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,7 +11,7 @@ namespace HelixCrm.Api.Features.Revenue;
 
 [ApiController]
 [Route("api/v1/quotes")]
-public class QuotesController(HelixDbContext db, IAutomationEngine automation) : ControllerBase
+public class QuotesController(HelixDbContext db, IAutomationEngine automation, EmailOutbox outbox) : ControllerBase
 {
     public record QuoteLineRequest(Guid? ProductId, string? Description, decimal? Quantity, decimal? UnitPrice, decimal? DiscountPercent);
 
@@ -17,6 +19,8 @@ public class QuotesController(HelixDbContext db, IAutomationEngine automation) :
         Guid? AccountId, Guid? DealId, Guid? ContactId, string? Status, DateTime? IssueDate,
         DateTime? ExpiryDate, string? Currency, decimal? DiscountPercent, decimal? TaxPercent,
         string? Notes, Guid? OwnerId, List<QuoteLineRequest>? Lines);
+
+    public record SendQuoteRequest(string? To, string? Message);
 
     public record QuoteLineDto(Guid Id, Guid? ProductId, string? ProductName, string Description,
         decimal Quantity, decimal UnitPrice, decimal DiscountPercent, decimal LineTotal);
@@ -101,6 +105,75 @@ public class QuotesController(HelixDbContext db, IAutomationEngine automation) :
             quote.Subtotal, quote.TaxTotal, quote.Total, quote.Notes, quote.OwnerId, quote.Owner?.FullName,
             quote.Owner?.AvatarUrl, quote.CreatedAt, quote.UpdatedAt, lines, audit.Select(SharedMapper.Audit).ToList()));
     }
+
+    [HttpPost("{id:guid}/send")]
+    public async Task<ActionResult> Send(Guid id, SendQuoteRequest request)
+    {
+        var quote = await db.Quotes
+            .Include(q => q.Account).Include(q => q.Contact)
+            .Include(q => q.Lines).ThenInclude(l => l.Product)
+            .FirstOrDefaultAsync(q => q.Id == id)
+            ?? throw new ApiException(404, "Quote not found.");
+
+        var organization = await db.GetCurrentOrganizationAsync();
+        var to = EmailAddresses.Normalize(request.To)
+            ?? EmailAddresses.Normalize(quote.Contact?.Email)
+            ?? EmailAddresses.Normalize(quote.Account?.Email);
+        if (to is null)
+            throw new ApiException(400, "Add a contact email or supply a recipient before sending.");
+
+        var message = await outbox.EnqueueAsync(new NewEmail(
+            to,
+            quote.Contact?.FullName ?? quote.Account?.Name,
+            $"Quote {quote.Number} from {organization.Name}",
+            BuildQuoteEmail(quote, organization.Name, request.Message),
+            RelatedType: "Quote", RelatedId: quote.Id, ContactId: quote.ContactId),
+            HttpContext.RequestAborted);
+
+        if (quote.Status == QuoteStatus.Draft) quote.Status = QuoteStatus.Sent;
+        await db.SaveChangesAsync();
+
+        return Accepted(new { id = message.Id, status = message.Status, messageId = message.MessageId });
+    }
+
+    private static string BuildQuoteEmail(Quote quote, string organizationName, string? message)
+    {
+        var body = new StringBuilder();
+        var firstName = quote.Contact?.FirstName;
+        body.AppendLine(string.IsNullOrWhiteSpace(firstName) ? "Hello," : $"Hi {firstName},");
+        body.AppendLine();
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            body.AppendLine(message.Trim());
+            body.AppendLine();
+        }
+
+        body.AppendLine($"Quote {quote.Number} from {organizationName}");
+        var validity = quote.ExpiryDate is null ? "" : $" · valid until {quote.ExpiryDate:yyyy-MM-dd}";
+        body.AppendLine($"Issued {quote.IssueDate:yyyy-MM-dd}{validity}");
+        body.AppendLine();
+
+        foreach (var line in quote.Lines.OrderBy(l => l.CreatedAt))
+            body.AppendLine($"- {line.Description}  x{line.Quantity:0.##}  {Money(line.LineTotal, quote.Currency)}");
+
+        body.AppendLine();
+        body.AppendLine($"Subtotal: {Money(quote.Subtotal, quote.Currency)}");
+        if (quote.DiscountPercent > 0) body.AppendLine($"Discount: {quote.DiscountPercent:0.##}%");
+        if (quote.TaxPercent > 0) body.AppendLine($"Tax: {quote.TaxPercent:0.##}% ({Money(quote.TaxTotal, quote.Currency)})");
+        body.AppendLine($"Total: {Money(quote.Total, quote.Currency)}");
+        body.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(quote.Notes))
+        {
+            body.AppendLine(quote.Notes.Trim());
+            body.AppendLine();
+        }
+        body.AppendLine("Reply to this email if you have any questions.");
+
+        return body.ToString();
+    }
+
+    private static string Money(decimal value, string currency) => $"{currency} {value:N2}";
 
     [HttpPost]
     public async Task<ActionResult<QuoteDetailDto>> Create(QuoteRequest request)

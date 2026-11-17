@@ -99,6 +99,45 @@ public static class DuplicateStatus
     public static readonly string[] All = [Pending, Merged, Dismissed];
 }
 
+public static class EmailDirection
+{
+    public const string Outbound = "Outbound";
+    public const string Inbound = "Inbound";
+    public static readonly string[] All = [Outbound, Inbound];
+}
+
+public static class EmailStatus
+{
+    public const string Queued = "Queued";
+    public const string Sending = "Sending";
+    public const string Sent = "Sent";
+    public const string Failed = "Failed";
+    public const string Suppressed = "Suppressed";
+    public const string Received = "Received";
+    public const string Review = "Review";
+    public const string Dismissed = "Dismissed";
+    public static readonly string[] All =
+        [Queued, Sending, Sent, Failed, Suppressed, Received, Review, Dismissed];
+    public static readonly string[] Outbound = [Queued, Sending, Sent, Failed, Suppressed];
+}
+
+public static class EmailSuppressionReason
+{
+    public const string Unsubscribed = "Unsubscribed";
+    public const string Bounced = "Bounced";
+    public const string Complaint = "Complaint";
+    public const string Manual = "Manual";
+    public static readonly string[] All = [Unsubscribed, Bounced, Complaint, Manual];
+}
+
+public static class EmailSecurity
+{
+    public const string None = "None";
+    public const string StartTls = "StartTls";
+    public const string SslOnConnect = "SslOnConnect";
+    public static readonly string[] All = [None, StartTls, SslOnConnect];
+}
+
 public static class LeadRoutingState
 {
     public const string Unrouted = "Unrouted";

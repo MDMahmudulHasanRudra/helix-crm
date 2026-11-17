@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Braces, Building2, GitBranch, MessageSquareQuote, Palette, Settings2, UserRound, Users, Workflow } from "lucide-react";
+import { Bot, Braces, Building2, GitBranch, Mail, MessageSquareQuote, Palette, Settings2, UserRound, Users, Workflow } from "lucide-react";
 import { PageHeader } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,7 @@ import { AppearanceSettings, WorkspaceSettings } from "@/components/settings/wor
 import { AutomationsSettings } from "@/components/settings/automations-settings";
 import { AutonomousSettingsPanel } from "@/components/settings/autonomous-settings";
 import { CannedResponsesSettings } from "@/components/settings/canned-responses-settings";
+import { EmailSettings } from "@/components/settings/email-settings";
 
 const TABS = [
   { value: "profile", label: "Profile", icon: UserRound, description: "Your details and password" },
@@ -23,6 +24,7 @@ const TABS = [
   { value: "autonomous", label: "Autonomous", icon: Bot, description: "Self-driving revenue operations" },
   { value: "automations", label: "Automations", icon: Workflow, description: "Trigger tasks and alerts" },
   { value: "canned", label: "Canned responses", icon: MessageSquareQuote, description: "Reusable ticket replies" },
+  { value: "email", label: "Email", icon: Mail, description: "Mailboxes, outbox and review" },
   { value: "workspace", label: "Workspace", icon: Building2, description: "Identity and regional defaults" },
   { value: "appearance", label: "Appearance", icon: Palette, description: "Theme and display" },
 ] as const;
@@ -99,6 +101,7 @@ export default function SettingsPage() {
           {tab === "autonomous" ? <AutonomousSettingsPanel /> : null}
           {tab === "automations" ? <AutomationsSettings /> : null}
           {tab === "canned" ? <CannedResponsesSettings /> : null}
+          {tab === "email" ? <EmailSettings /> : null}
           {tab === "workspace" ? <WorkspaceSettings /> : null}
           {tab === "appearance" ? <AppearanceSettings /> : null}
         </div>

@@ -32,8 +32,16 @@ services:
       Cookie__Secure: "false"
       Proxy__KnownProxies: ${PROXY_KNOWN_PROXIES:-}
       Proxy__KnownNetworks: ${PROXY_KNOWN_NETWORKS:-}
+      DataProtection__KeysPath: /app/.dataprotection-keys
+      Email__DispatcherEnabled: ${EMAIL_DISPATCHER_ENABLED:-true}
+      Email__InboundEnabled: ${EMAIL_INBOUND_ENABLED:-true}
+      Email__DispatchIntervalSeconds: ${EMAIL_DISPATCH_INTERVAL_SECONDS:-15}
+      Email__InboundIntervalMinutes: ${EMAIL_INBOUND_INTERVAL_MINUTES:-2}
     ports:
       - "${API_PORT:-5080}:8080"
+    volumes:
+      # Mailbox passwords are encrypted with a key ring that must survive restarts.
+      - helix_dpkeys:/app/.dataprotection-keys
     depends_on:
       db:
         condition: service_healthy
@@ -56,3 +64,4 @@ services:
 
 volumes:
   helix_pgdata:
+  helix_dpkeys:

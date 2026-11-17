@@ -11,7 +11,7 @@ Status legend: **✔ shipped** · **◐ partial** (core flow present, advanced e
 | Leads | ✔ | Table + kanban by status, score, estimated value, source, qualification notes |
 | Lead conversion | ✔ | Creates/links account, contact and deal, records conversion audit |
 | Deals | ✔ | Configurable pipelines, kanban drag, table view, probability, close date, won/lost |
-| Activities | ✔ | Tasks, calls, meetings, manually logged emails, notes, replies; due buckets; complete/reopen |
+| Activities | ✔ | Tasks, calls, meetings, logged emails, notes and replies; due buckets; complete/reopen |
 | Products | ✔ | SKU, price, tax rate, category, active flag |
 | Quotes | ✔ | Line items, product picker, per-line discount, order discount, tax, status workflow, print view |
 | CSV export | ✔ | Accounts, contacts, leads, deals, tickets, quotes, invoices |
@@ -50,12 +50,14 @@ Status legend: **✔ shipped** · **◐ partial** (core flow present, advanced e
 | --- | --- | --- |
 | Shared ticket inbox | ✔ | Table + board, search, status/priority/channel/assignee filters |
 | Conversation thread | ✔ | Chronological replies and internal notes with author and timestamp |
-| Public reply vs internal note | ◐ | The thread distinguishes public replies from internal notes, but replies are **not delivered by email yet** — nothing leaves the app. Both are auto-logged to the global activity stream |
+| Public reply vs internal note | ✔ | Public replies are queued for SMTP delivery and shown with their delivery status; internal notes stay in-app. Both are auto-logged to the global activity stream |
 | Visible SLA breach & escalation state | ✔ | Server-side breach flag and escalation level are shown in the inbox and ticket detail |
 | Assignment & status workflow | ✔ | Open → Pending → Resolved → Closed with timestamps |
 | Ticket ↔ account/contact link | ✔ | Shown on both profiles |
 | Canned responses / macros | ✔ | Categorised replies with `/shortcuts`, managed in Settings, inserted from the ticket reply box |
-| Email ingestion | — | Roadmap (webhook/IMAP worker) |
+| Outbound email | ✔ | Per-workspace SMTP mailbox, durable outbox, retry with backoff, daily cap and suppression list, Message-ID threading; `Sent` means the server accepted the message, not a delivery receipt |
+| Email ingestion | ◐ | Background IMAP polling matches replies by headers, then by the `[#TCK-…]` subject token. Unmatched mail goes to a review queue for manual linking or dismissal. Provider webhooks are roadmap |
+| Quote email | ◐ | Sending a quote queues a plain-text summary and moves Draft → Sent; PDF attachment is roadmap |
 
 ## Workspace & platform
 
@@ -70,17 +72,18 @@ Status legend: **✔ shipped** · **◐ partial** (core flow present, advanced e
 | Global search | ✔ | ⌘K palette across accounts, contacts, leads, deals, tickets |
 | Notifications | ✔ | Inbox popover, mark one/all read |
 | Dashboard | ✔ | KPIs, revenue trend, pipeline, leaderboard, tasks, recent activity, tickets, top deals |
-| Settings | ✔ | Profile, team, pipelines, custom fields, autonomous engines, automations, canned responses, workspace branding/currency/timezone, appearance |
+| Settings | ✔ | Profile, team, pipelines, custom fields, autonomous engines, automations, canned responses, email mailboxes/outbox/review/suppressions, workspace branding/currency/timezone, appearance |
 | Workflow automation | ◐ | Rules on lead created / deal won / ticket created / quote accepted that create a task or notify the owner; no conditions yet |
 | Dark mode | ✔ | Token-driven, persisted locally |
 | CSV exports | ✔ | RFC 4180 with BOM |
 | API reference | ✔ | Scalar UI + OpenAPI document |
 | Docker packaging | ✔ | Compose with db/api/web; health-checked database |
-| Tests | ✔ | 58 unit tests plus a PostgreSQL integration suite (tenancy, duplicate merge, lead conversion) that runs when `HELIX_TEST_POSTGRES` is set; no browser E2E yet |
+| Tests | ✔ | 82 unit tests plus a PostgreSQL integration suite (tenancy, duplicate merge, lead conversion, email credentials/threading/suppression/review) that runs when `HELIX_TEST_POSTGRES` is set; no browser E2E yet |
 
 ## Deliberate gaps (roadmap)
 
-- Outbound email delivery and inbound email ingestion (SMTP/IMAP/webhook, message-id threading) — tickets, quotes and follow-ups do not send mail yet
+- Provider email adapters and delivery webhooks (SES/Mailgun/Brevo) with bounce/complaint events; plain SMTP/IMAP is the supported path today
+- Email open/click tracking, scheduled send and sequence automation
 - Lead capture endpoints, per-organisation API keys and outbound webhooks
 - Quote/invoice PDF delivery, public view links, accept/decline and payment links
 - File attachments on records

@@ -23,7 +23,8 @@ public record ActivityDto(
     int? DurationMinutes,
     string? Outcome,
     DateTime CreatedAt,
-    string? RelatedName = null);
+    string? RelatedName = null,
+    string? EmailStatus = null);
 
 public record AuditDto(Guid Id, string Action, string EntityType, Guid EntityId, string ActorName, string ChangesJson, DateTime CreatedAt);
 
@@ -31,10 +32,10 @@ public record CustomFieldValueDto(string Key, string Label, string FieldType, st
 
 public static class SharedMapper
 {
-    public static ActivityDto Activity(Domain.Activity a, Domain.User? owner, string? relatedName = null) => new(
+    public static ActivityDto Activity(Domain.Activity a, Domain.User? owner, string? relatedName = null, string? emailStatus = null) => new(
         a.Id, a.Type, a.Subject, a.Body, a.DueAt, a.CompletedAt, a.Status, a.Priority,
         a.RelatedType, a.RelatedId, a.OwnerId, owner?.FullName, owner?.AvatarUrl,
-        a.DurationMinutes, a.Outcome, a.CreatedAt, relatedName);
+        a.DurationMinutes, a.Outcome, a.CreatedAt, relatedName, emailStatus);
 
     public static AuditDto Audit(Domain.AuditLog log) => new(
         log.Id, log.Action, log.EntityType, log.EntityId,

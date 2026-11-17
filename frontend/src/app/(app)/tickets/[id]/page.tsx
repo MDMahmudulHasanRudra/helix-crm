@@ -75,20 +75,12 @@ export default function TicketDetailPage() {
     }
     setSending(true);
     try {
-      await mutate("/activities", "POST", {
-        type: internal ? "Note" : "Email",
-        subject: internal ? "Internal note" : `Re: ${ticket!.subject}`,
-        body: reply,
-        relatedType: "Ticket",
-        relatedId: ticket!.id,
-        ownerId: me.user.id,
-        priority: "Normal",
-      });
+      await mutate(`/tickets/${ticket!.id}/replies`, "POST", { body: reply, internal });
       setReply("");
       setInternal(false);
       await refresh();
-      await globalMutate((key) => typeof key === "string" && (key.startsWith("/tickets") || key.startsWith("/dashboard") || key.startsWith("/activities")));
-      toast.success(internal ? "Internal note added" : "Reply sent");
+      await globalMutate((key) => typeof key === "string" && (key.startsWith("/tickets") || key.startsWith("/dashboard") || key.startsWith("/activities") || key.startsWith("/email")));
+      toast.success(internal ? "Internal note added" : "Reply queued for delivery");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to send reply");
     } finally {
@@ -445,12 +437,14 @@ function ChatMessage({
   body,
   kind,
   badge,
+  deliveryStatus,
 }: {
   name: string;
   date?: string | null;
   body: string;
   kind: "customer" | "agent" | "internal";
   badge?: string;
+  deliveryStatus?: string | null;
 }) {
   const isCustomer = kind === "customer";
   return (
@@ -460,6 +454,7 @@ function ChatMessage({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[12px] font-semibold text-foreground">{name}</span>
           {badge ? <Badge tone="neutral">{badge}</Badge> : null}
+          {deliveryStatus ? <DeliveryBadge status={deliveryStatus} /> : null}
           {kind === "internal" ? <Badge tone="warning"><Lock className="size-2.5" /> Internal note</Badge> : null}
           <span className="text-[10.5px] text-faint">{formatDateTime(date)}</span>
         </div>
@@ -485,8 +480,18 @@ function ActivityMessage({ activity }: { activity: Activity }) {
       body={activity.body ?? activity.subject}
       kind={internal ? "internal" : "agent"}
       badge={internal ? undefined : activity.type}
+      deliveryStatus={activity.emailStatus}
     />
   );
+}
+
+function DeliveryBadge({ status }: { status: string }) {
+  const tone =
+    status === "Sent" ? "success"
+      : status === "Failed" || status === "Suppressed" ? "danger"
+        : status === "Queued" || status === "Sending" ? "info"
+          : "neutral";
+  return <Badge tone={tone} dot>{status}</Badge>;
 }
 
 function channelIcon(channel: string) {

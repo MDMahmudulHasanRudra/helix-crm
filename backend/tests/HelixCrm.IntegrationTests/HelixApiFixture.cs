@@ -35,6 +35,8 @@ public sealed class HelixApiFixture : WebApplicationFactory<Program>, IAsyncLife
         // environment is the one place these values are guaranteed to be visible.
         Environment.SetEnvironmentVariable("ConnectionStrings__Default", ConnectionString);
         Environment.SetEnvironmentVariable("Autonomous__DaemonEnabled", "false");
+        Environment.SetEnvironmentVariable("Email__DispatcherEnabled", "false");
+        Environment.SetEnvironmentVariable("Email__InboundEnabled", "false");
         Environment.SetEnvironmentVariable("Cookie__Secure", "false");
     }
 

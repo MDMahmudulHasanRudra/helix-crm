@@ -2,6 +2,7 @@ using HelixCrm.Api.Common;
 using HelixCrm.Api.Data;
 using HelixCrm.Api.Domain;
 using HelixCrm.Api.Features.Config;
+using HelixCrm.Api.Features.Email;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,7 +10,7 @@ namespace HelixCrm.Api.Features.Tickets;
 
 [ApiController]
 [Route("api/v1/tickets")]
-public class TicketsController(HelixDbContext db, IAutomationEngine automation) : ControllerBase
+public class TicketsController(HelixDbContext db, IAutomationEngine automation, EmailOutbox outbox) : ControllerBase
 {
     public record TicketRequest(
         string? Subject, string? Description, string? Status, string? Priority, string? Channel,
@@ -17,6 +18,7 @@ public class TicketsController(HelixDbContext db, IAutomationEngine automation) 
 
     public record StatusRequest(string? Status);
     public record AssignRequest(Guid? AssigneeId);
+    public record ReplyRequest(string? Body, bool? Internal);
 
     public record TicketListItemDto(
         Guid Id, string Number, string Subject, string Status, string Priority, string Channel,
@@ -112,13 +114,23 @@ public class TicketsController(HelixDbContext db, IAutomationEngine automation) 
             .Where(a => a.EntityType == nameof(Ticket) && a.EntityId == id)
             .OrderByDescending(a => a.CreatedAt).Take(30).ToListAsync();
 
+        var emailIds = conversation.Where(a => a.EmailMessageId is not null)
+            .Select(a => a.EmailMessageId!.Value).Distinct().ToList();
+        var emailStatuses = emailIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await db.EmailMessages.AsNoTracking()
+                .Where(m => emailIds.Contains(m.Id))
+                .ToDictionaryAsync(m => m.Id, m => m.Status);
+
         return Ok(new TicketDetailDto(
             ticket.Id, ticket.Number, ticket.Subject, ticket.Description, ticket.Status, ticket.Priority,
             ticket.Channel, ticket.AccountId, ticket.Account?.Name, ticket.ContactId, ticket.Contact?.FullName,
             ticket.AssigneeId, ticket.Assignee?.FullName, ticket.Assignee?.AvatarUrl, ticket.SlaDueAt,
             ticket.FirstResponseAt, ticket.ResolvedAt, ticket.CreatedAt, ticket.UpdatedAt,
             Json.StringList(ticket.TagsJson).ToArray(),
-            conversation.Select(a => SharedMapper.Activity(a, a.Owner, ticket.Subject)).ToList(),
+            conversation.Select(a => SharedMapper.Activity(
+                a, a.Owner, ticket.Subject,
+                a.EmailMessageId is Guid emailId && emailStatuses.TryGetValue(emailId, out var status) ? status : null)).ToList(),
             audit.Select(SharedMapper.Audit).ToList(), ticket.SlaBreached, ticket.EscalationLevel));
     }
 
@@ -213,6 +225,67 @@ public class TicketsController(HelixDbContext db, IAutomationEngine automation) 
         ticket.AssigneeId = request.AssigneeId;
         await db.SaveChangesAsync();
         return Ok(await ListItem(id));
+    }
+
+    [HttpPost("{id:guid}/replies")]
+    public async Task<ActionResult<TicketDetailDto>> Reply(Guid id, ReplyRequest request)
+    {
+        var ticket = await db.Tickets.Include(t => t.Contact)
+            .FirstOrDefaultAsync(t => t.Id == id)
+            ?? throw new ApiException(404, "Ticket not found.");
+
+        var body = request.Body.Clean(20_000);
+        if (body.Length == 0) throw new ApiException(400, "Write a reply first.");
+
+        var now = DateTime.UtcNow;
+        if (request.Internal == true)
+        {
+            db.Activities.Add(new Activity
+            {
+                OrganizationId = ticket.OrganizationId,
+                Type = ActivityType.Note,
+                Subject = "Internal note",
+                Body = body,
+                RelatedType = EntityTypes.Ticket,
+                RelatedId = ticket.Id,
+                Status = ActivityStatus.Completed,
+                CompletedAt = now,
+                Priority = "Normal",
+                OwnerId = User.GetUserId()
+            });
+            await db.SaveChangesAsync();
+            return Ok(await BuildDetail(id));
+        }
+
+        var email = ticket.Contact?.Email;
+        if (string.IsNullOrWhiteSpace(email))
+            throw new ApiException(400, "Add an email address to the ticket's contact before replying.");
+
+        var message = await outbox.EnqueueAsync(new NewEmail(
+            email, ticket.Contact?.FullName, $"Re: {ticket.Subject}", body,
+            RelatedType: EntityTypes.Ticket, RelatedId: ticket.Id, ContactId: ticket.ContactId),
+            HttpContext.RequestAborted);
+
+        var activity = new Activity
+        {
+            OrganizationId = ticket.OrganizationId,
+            Type = ActivityType.Email,
+            Subject = message.Subject.Clean(240),
+            Body = body,
+            RelatedType = EntityTypes.Ticket,
+            RelatedId = ticket.Id,
+            Status = ActivityStatus.Completed,
+            CompletedAt = now,
+            Priority = "Normal",
+            OwnerId = User.GetUserId(),
+            EmailMessageId = message.Id
+        };
+        db.Activities.Add(activity);
+        message.ActivityId = activity.Id;
+        ticket.FirstResponseAt ??= now;
+        await db.SaveChangesAsync();
+
+        return Ok(await BuildDetail(id));
     }
 
     [HttpDelete("{id:guid}")]

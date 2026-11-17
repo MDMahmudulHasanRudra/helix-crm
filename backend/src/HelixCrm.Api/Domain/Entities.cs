@@ -30,6 +30,9 @@ public class Organization
     public int StaleDealProbabilityPenalty { get; set; } = 15;
     public int DataFreshnessDays { get; set; } = 180;
     public int LeadScoreRoutingThreshold { get; set; } = 75;
+
+    // Safety rail for outbound mail; counted per UTC day across all accounts.
+    public int EmailDailyLimit { get; set; } = 300;
 }
 
 public class User : OrgEntity
@@ -209,6 +212,9 @@ public class Activity : OrgEntity
     public User? Owner { get; set; }
     public int? DurationMinutes { get; set; }
     public string? Outcome { get; set; }
+
+    // Set when the activity represents a queued or received email.
+    public Guid? EmailMessageId { get; set; }
 }
 
 public class Ticket : OrgEntity
@@ -402,4 +408,91 @@ public class DuplicateCandidate : OrgEntity
     public double Similarity { get; set; }
     public string Status { get; set; } = DuplicateStatus.Pending;
     public string Reason { get; set; } = "";
+}
+
+/// <summary>
+/// A mailbox the workspace sends and polls from. Passwords are stored as
+/// DataProtection ciphertext, never as plain text.
+/// </summary>
+public class EmailAccount : OrgEntity
+{
+    public string Name { get; set; } = "";
+    public string FromName { get; set; } = "";
+    public string FromAddress { get; set; } = "";
+    public string? ReplyToAddress { get; set; }
+
+    public string SmtpHost { get; set; } = "";
+    public int SmtpPort { get; set; } = 587;
+    public string SmtpSecurity { get; set; } = EmailSecurity.StartTls;
+    public string SmtpUsername { get; set; } = "";
+    public string? SmtpPasswordCipher { get; set; }
+
+    public string ImapHost { get; set; } = "";
+    public int ImapPort { get; set; } = 993;
+    public string ImapSecurity { get; set; } = EmailSecurity.SslOnConnect;
+    public string ImapUsername { get; set; } = "";
+    public string? ImapPasswordCipher { get; set; }
+    public string ImapFolder { get; set; } = "INBOX";
+    public bool ImapEnabled { get; set; } = true;
+    public uint? LastImapUid { get; set; }
+    public DateTime? LastImapSyncAt { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public bool IsDefault { get; set; }
+    public DateTime? LastVerifiedAt { get; set; }
+    public string? LastError { get; set; }
+}
+
+/// <summary>
+/// One row per message in either direction. Outbound rows are the durable queue;
+/// inbound rows are the received copy used for threading and the review queue.
+/// </summary>
+public class EmailMessage : OrgEntity
+{
+    public Guid? EmailAccountId { get; set; }
+    public EmailAccount? EmailAccount { get; set; }
+
+    public string Direction { get; set; } = EmailDirection.Outbound;
+    public string Status { get; set; } = EmailStatus.Queued;
+    public string FromAddress { get; set; } = "";
+    public string FromName { get; set; } = "";
+    public string ToAddress { get; set; } = "";
+    public string ToName { get; set; } = "";
+    public string? Cc { get; set; }
+    public string? Bcc { get; set; }
+    public string Subject { get; set; } = "";
+    public string? TextBody { get; set; }
+    public string? HtmlBody { get; set; }
+
+    // RFC 5322 threading headers. MessageId includes the angle brackets.
+    public string? MessageId { get; set; }
+    public string? InReplyTo { get; set; }
+    public string? References { get; set; }
+
+    public string? RelatedType { get; set; }
+    public Guid? RelatedId { get; set; }
+    public Guid? ContactId { get; set; }
+    public Guid? ActivityId { get; set; }
+
+    public int Attempts { get; set; }
+    public int MaxAttempts { get; set; } = 5;
+    public DateTime? NextAttemptAt { get; set; }
+    public DateTime? SentAt { get; set; }
+    public string? FailureReason { get; set; }
+
+    public bool NeedsReview { get; set; }
+    public string? ImapFolder { get; set; }
+    public string? ImapUid { get; set; }
+    public DateTime? ReceivedAt { get; set; }
+}
+
+/// <summary>
+/// Addresses that must never receive automated mail again. Checked at enqueue
+/// and again at send time so an unsubscribe mid-queue still wins.
+/// </summary>
+public class EmailSuppression : OrgEntity
+{
+    public string Email { get; set; } = "";
+    public string Reason { get; set; } = EmailSuppressionReason.Unsubscribed;
+    public string? Note { get; set; }
 }

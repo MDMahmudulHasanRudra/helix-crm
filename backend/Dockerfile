@@ -14,5 +14,7 @@ ENV ASPNETCORE_URLS=http://+:8080 \
     DOTNET_RUNNING_IN_CONTAINER=true
 EXPOSE 8080
 COPY --from=build /app/publish .
+# The DataProtection key ring lives here so encrypted mailbox passwords survive restarts.
+RUN mkdir -p /app/.dataprotection-keys && chown -R $APP_UID:$APP_UID /app/.dataprotection-keys
 USER $APP_UID
 ENTRYPOINT ["dotnet", "HelixCrm.Api.dll"]
