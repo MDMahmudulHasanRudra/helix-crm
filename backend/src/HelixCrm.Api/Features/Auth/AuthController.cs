@@ -3,6 +3,7 @@ using HelixCrm.Api.Data;
 using HelixCrm.Api.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace HelixCrm.Api.Features.Auth;
@@ -11,6 +12,11 @@ namespace HelixCrm.Api.Features.Auth;
 [Route("api/v1/auth")]
 public class AuthController(HelixDbContext db, TokenService tokens, IConfiguration configuration) : ControllerBase
 {
+    private const int MaxFailedAttempts = 5;
+    private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
+    private static readonly Lazy<string> DummyHash =
+        new(() => PasswordHasher.Hash(Guid.NewGuid().ToString("N")));
+
     public record LoginRequest(string? Email, string? Password);
     public record ChangePasswordRequest(string? CurrentPassword, string? NewPassword);
     public record UpdateProfileRequest(string? FirstName, string? LastName, string? Title, string? Phone);
@@ -29,6 +35,7 @@ public class AuthController(HelixDbContext db, TokenService tokens, IConfigurati
 
     [HttpPost("login")]
     [AllowAnonymous]
+    [EnableRateLimiting("login")]
     public async Task<ActionResult<MeDto>> Login(LoginRequest request)
     {
         var email = request.Email.Clean(254).ToLowerInvariant();
@@ -40,19 +47,67 @@ public class AuthController(HelixDbContext db, TokenService tokens, IConfigurati
         var user = await db.Users.IgnoreQueryFilters()
             .FirstOrDefaultAsync(u => u.Email == email && !u.IsDeleted);
 
-        if (user is null || !user.IsActive || !PasswordHasher.Verify(password, user.PasswordHash))
+        // Spend the same hashing work for unknown emails so response timing does not leak accounts.
+        if (user is null)
+        {
+            PasswordHasher.Verify(password, DummyHash.Value);
             throw new ApiException(401, "Invalid email or password.");
+        }
+
+        var now = DateTime.UtcNow;
+        if (user.LockoutEndAt is { } lockedUntil && lockedUntil > now)
+        {
+            var minutes = Math.Max(1, (int)Math.Ceiling((lockedUntil - now).TotalMinutes));
+            throw new ApiException(429,
+                $"Too many failed sign-in attempts. Try again in {minutes} minute{(minutes == 1 ? "" : "s")}.");
+        }
+
+        if (!PasswordHasher.Verify(password, user.PasswordHash) || !user.IsActive)
+        {
+            var lockedOut = await RecordFailedLoginAsync(user, now);
+            throw lockedOut
+                ? new ApiException(429,
+                    $"Too many failed sign-in attempts. Try again in {LockoutDuration.TotalMinutes:0} minutes.")
+                : new ApiException(401, "Invalid email or password.");
+        }
+
+        user.FailedLoginAttempts = 0;
+        user.LockoutEndAt = null;
+        user.LastLoginAt = now;
+        await db.SaveChangesAsync();
 
         var organization = await db.Organizations.FindAsync(user.OrganizationId)
             ?? throw new ApiException(401, "Workspace not found.");
-
-        user.LastLoginAt = DateTime.UtcNow;
-        await db.SaveChangesAsync();
 
         var (token, expires) = tokens.Create(user, organization);
         SetAuthCookie(token, expires);
 
         return Ok(new MeDto(DtoMapper.User(user), DtoMapper.Organization(organization)));
+    }
+
+    /// <summary>Counts a failed attempt and starts a cooldown once the threshold is crossed.</summary>
+    private async Task<bool> RecordFailedLoginAsync(User user, DateTime now)
+    {
+        // An expired lockout starts a fresh streak.
+        if (user.LockoutEndAt is { } lockedUntil && lockedUntil <= now)
+        {
+            user.LockoutEndAt = null;
+            user.FailedLoginAttempts = 0;
+        }
+
+        user.FailedLoginAttempts++;
+
+        var lockedOut = user.FailedLoginAttempts >= MaxFailedAttempts;
+        if (lockedOut)
+        {
+            user.FailedLoginAttempts = 0;
+            user.LockoutEndAt = now.Add(LockoutDuration);
+        }
+
+        // Security bookkeeping is not worth an audit row per password guess.
+        db.AuditEnabled = false;
+        await db.SaveChangesAsync();
+        return lockedOut;
     }
 
     [HttpPost("logout")]

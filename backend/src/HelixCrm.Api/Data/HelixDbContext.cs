@@ -35,6 +35,21 @@ public class HelixDbContext(DbContextOptions<HelixDbContext> options, ITenantPro
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Notification> Notifications => Set<Notification>();
 
+    /// <summary>
+    /// Resolves the workspace for the current request or background scope.
+    /// <see cref="Organization"/> is deliberately not an <see cref="OrgEntity"/>, so it has no
+    /// global query filter — every lookup must be scoped by the tenant explicitly.
+    /// </summary>
+    public async Task<Organization> GetCurrentOrganizationAsync(CancellationToken cancellationToken = default)
+    {
+        if (_tenant.OrganizationId == Guid.Empty)
+            throw new ApiException(401, "Workspace context is missing. Please sign in again.");
+
+        return await Organizations
+                   .FirstOrDefaultAsync(o => o.Id == _tenant.OrganizationId, cancellationToken)
+               ?? throw new ApiException(404, "Workspace not found.");
+    }
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.Entity<Organization>(e =>

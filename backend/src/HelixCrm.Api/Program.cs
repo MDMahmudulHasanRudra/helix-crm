@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Threading.RateLimiting;
 using HelixCrm.Api.Common;
 using HelixCrm.Api.Data;
 using HelixCrm.Api.Features.Auth;
@@ -7,6 +8,7 @@ using HelixCrm.Api.Features.Autonomous;
 using HelixCrm.Api.Features.Config;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
@@ -42,8 +44,7 @@ builder.Services.AddDbContext<HelixDbContext>(options =>
         npgsql.CommandTimeout(30);
     }));
 
-var jwtKey = builder.Configuration["Jwt:Key"]
-    ?? throw new InvalidOperationException("Jwt:Key is not configured.");
+var jwtKey = JwtKeyGuard.Resolve(builder.Configuration["Jwt:Key"], builder.Environment.IsDevelopment());
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "helix-crm";
 var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "helix-crm-web";
 
@@ -97,6 +98,31 @@ builder.Services.AddCors(options =>
     });
 });
 
+// Per-IP limit on sign-in. Account lockout in AuthController handles per-email guessing;
+// this caps spraying across many accounts from one address.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsync(
+            JsonSerializer.Serialize(
+                new { message = "Too many sign-in attempts. Please wait a minute and try again." },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            cancellationToken);
+    };
+    options.AddPolicy("login", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
+});
+
 var app = builder.Build();
 
 app.UseExceptionHandler(handler => handler.Run(async context =>
@@ -125,7 +151,9 @@ app.UseExceptionHandler(handler => handler.Run(async context =>
     }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
 }));
 
+app.UseRouting();
 app.UseCors("web");
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 

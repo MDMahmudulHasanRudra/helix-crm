@@ -27,7 +27,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Default: Host=db;Port=5432;Database=helix_crm;Username=helix;Password=helix_dev_password
-      Jwt__Key: ${JWT_KEY:-helix-prod-signing-key-change-me-7f4b2c9e1a8d5f3b6c0e4a2d9f7b1c5e}
+      Jwt__Key: "${JWT_KEY:-}"
       Cors__Origins__0: http://localhost:${WEB_PORT:-3000}
       Cookie__Secure: "false"
     ports:

@@ -12,22 +12,26 @@ Helix CRM is a complete, self-hosted CRM workspace built with **.NET 10**, **Nex
 | Contacts | Directory, account roll-up, primary contact, activity history, per-contact deals and tickets |
 | Leads | Table and drag-and-drop kanban by status, explainable scoring with factor breakdown, auto-routing to the least-loaded rep, qualification notes, one-click conversion to account + contact + deal |
 | Deals | Configurable pipelines, kanban and table views, stage stepper with probability, amount/close-date tracking, quotes, activity and audit |
-| Activities | Unified timeline of tasks, calls, meetings, emails, notes and replies, due-date buckets, complete/reopen |
-| Support inbox | Ticket inbox with table and board layouts, server-side SLA breach detection and auto-escalation, priority/channel/assignee filters, threaded conversation with public replies and internal notes |
+| Activities | Unified timeline of tasks, calls, meetings, manually logged emails, notes and replies, due-date buckets, complete/reopen |
+| Support inbox | Ticket inbox with table and board layouts, server-side SLA breach detection and auto-escalation, priority/channel/assignee filters, threaded conversation with public replies and internal notes (email delivery is not wired yet) |
 | Autonomous | Background daemon that scores/routes leads, flags stalled deals with health indexes and follow-up tasks, escalates SLA breaches, decays data freshness, and detects/merges duplicate accounts and contacts — configurable per workspace |
 | Revenue | Product catalogue, quotes with line items, product picker, per-line and order discounts, tax, status workflow, printable document view |
 | Analytics | Executive dashboard plus reports: revenue trend, pipeline by stage, team leaderboard, top accounts, lead funnel and source mix, support volume, activity mix |
 | Workspace | Team management with roles, invitation flow, multiple pipelines, per-entity custom fields, branding, currency, timezone, light/dark appearance |
-| Platform | JWT auth in an httpOnly cookie, organisation-scoped multi-tenancy, soft deletes, audit log, global search (⌘K), notifications, CSV exports, Scalar API reference |
+| Platform | JWT auth in an httpOnly cookie, tenant-scoped data access, login rate limiting and account lockout, soft deletes, audit log, global search (⌘K), notifications, CSV exports, Scalar API reference |
 
 See [docs/features.md](docs/features.md) for the full feature matrix and [docs/reference-analysis.md](docs/reference-analysis.md) for how each reference product shaped the design.
 
 ## Quick start with Docker
 
 ```bash
-cp .env.example .env          # optional: set JWT_KEY
+cp .env.example .env
+# Required: paste a unique 32+ character secret, e.g. the output of:
+openssl rand -hex 32
 docker compose up --build
 ```
+
+The API refuses to start in Production when `JWT_KEY` is missing, shorter than 32 characters, or still set to a sample value from this repository.
 
 | Service | URL |
 | --- | --- |
@@ -71,12 +75,24 @@ The frontend proxies `/api/v1/*` to `http://localhost:5080` (override with `API_
 
 ```bash
 dotnet build backend/src/HelixCrm.Api          # compile the API
-dotnet test backend/tests/HelixCrm.Tests       # unit tests
+dotnet test backend/tests/HelixCrm.Tests       # unit tests (58)
 dotnet ef migrations add <Name> --project backend/src/HelixCrm.Api
 powershell -File scripts/smoke.ps1             # full API smoke test (auth, CRUD, exports, autonomous)
 cd frontend && npm run build                   # production build
 cd frontend && npm run lint
 ```
+
+### Integration tests (real PostgreSQL)
+
+Start the database container, then point the integration suite at it:
+
+```bash
+docker compose up -d db
+export HELIX_TEST_POSTGRES="Host=localhost;Port=5433;Database=helix_crm;Username=helix;Password=helix_dev_password"
+dotnet test backend/tests/HelixCrm.IntegrationTests
+```
+
+Each run creates a throwaway database (`helix_it_*`), applies migrations, boots the API with `WebApplicationFactory`, and covers tenant isolation, duplicate merge and lead conversion. Without `HELIX_TEST_POSTGRES` those five tests are reported as skipped, not passed.
 
 > When running EF Core design-time commands set `Database__AutoMigrate=false` so the running app does not race the tooling.
 
@@ -91,7 +107,8 @@ backend/
     Features/        Auth, Accounts, Contacts, Leads, Deals, Activities,
                      Tickets, Revenue, Dashboard/Reports, Search,
                      Notifications, Users, Config, Autonomous
-  tests/HelixCrm.Tests/
+  tests/HelixCrm.Tests/            Unit tests
+  tests/HelixCrm.IntegrationTests/ PostgreSQL integration tests (opt-in via HELIX_TEST_POSTGRES)
 frontend/
   src/app/(app)/     Authenticated routes (dashboard, records, reports, settings)
   src/app/login/     Sign-in
@@ -107,7 +124,7 @@ docker-compose.yml   db + api + web
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `ConnectionStrings__Default` | `Host=localhost;Port=5433;...` | PostgreSQL connection |
-| `Jwt__Key` | dev key | JWT signing key — **change in production** |
+| `Jwt__Key` | dev key in Development only | JWT signing key — **required in Production**, minimum 32 characters |
 | `Jwt__ExpiryDays` | `7` | Session lifetime |
 | `Cookie__Secure` | `false` | Set `true` behind HTTPS |
 | `Database__AutoMigrate` | `true` | Apply migrations + seed at startup |
@@ -121,8 +138,9 @@ docker-compose.yml   db + api + web
 ## Security notes
 
 - Passwords are hashed with PBKDF2-SHA256 (120 000 iterations, per-password salt).
-- Sessions use a signed JWT delivered as an `httpOnly`, `SameSite=Lax` cookie; the API also accepts `Authorization: Bearer` for integrations.
-- Every query is scoped to the signed-in user's organisation through EF Core global query filters; IDs alone never grant cross-tenant access.
+- Sign-in is rate-limited per IP (10 requests/minute) and locks an account for 15 minutes after 5 consecutive failures; successful sign-in resets the counter.
+- Sessions use a signed JWT delivered as an `httpOnly`, `SameSite=Lax` cookie; the API also accepts `Authorization: Bearer` for integrations. In Production the API will not start with a missing, short, or sample JWT key.
+- Every query is scoped to the signed-in user's organisation through EF Core global query filters; workspace lookups go through a tenant-scoped helper, so IDs alone never grant cross-tenant access.
 - Mutations are role-gated (Admin/Manager/Rep) and every create/update/delete is written to an immutable audit log.
 - Records are soft-deleted, so exports and dashboards cannot resurrect removed data.
 

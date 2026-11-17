@@ -45,6 +45,10 @@ public class User : OrgEntity
     public bool IsActive { get; set; } = true;
     public DateTime? LastLoginAt { get; set; }
 
+    // Brute-force protection: consecutive failures lock the account for a short window.
+    public int FailedLoginAttempts { get; set; }
+    public DateTime? LockoutEndAt { get; set; }
+
     public string FullName => $"{FirstName} {LastName}".Trim();
 }
 

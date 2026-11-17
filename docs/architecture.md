@@ -17,12 +17,15 @@ The rewrite in `frontend/next.config.ts` keeps the browser on one origin, which 
 
 ## 2. Authentication and tenancy
 
-1. `POST /api/v1/auth/login` verifies the PBKDF2 hash (`PasswordHasher`) and issues a JWT signed with `Jwt:Key`.
+1. `POST /api/v1/auth/login` verifies the PBKDF2 hash (`PasswordHasher`) and issues a JWT signed with `Jwt:Key`. Per-IP rate limiting (10/min) and a 5-failure / 15-minute account lockout protect the endpoint; failed attempts are not audited to avoid log flooding.
 2. The token carries `sub` (user), `org` (organisation), `email`, `name` and `role` claims. It is written to the `helix_token` cookie (httpOnly, SameSite=Lax) and is also accepted as a Bearer token.
 3. `HttpTenantProvider` exposes the current organisation/user from the request principal.
 4. `HelixDbContext` applies a **global query filter** to every `OrgEntity`:
    `x.OrganizationId == tenant.OrganizationId && !x.IsDeleted`.
 5. Controllers never take an organisation ID from the client; it always comes from the token. This makes IDOR attacks ineffective — a valid ID from another workspace simply resolves to nothing.
+6. `Organization` is intentionally not an `OrgEntity` (it is the tenant root) and therefore has no query filter. Workspace lookups must use `HelixDbContext.GetCurrentOrganizationAsync()`, which filters by `tenant.OrganizationId`; never query `db.Organizations.FirstAsync()` in request code.
+
+In non-Development environments `JwtKeyGuard` fails startup when `Jwt:Key` is missing, shorter than 32 characters, or equal to a sample key committed to this repository. Development keeps a zero-config fallback.
 
 `frontend/src/proxy.ts` performs a cheap cookie-existence guard for app routes, while the API remains the authority for every request. Unauthenticated API calls return `401`; the client redirects to `/login`.
 

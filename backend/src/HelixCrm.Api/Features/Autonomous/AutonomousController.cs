@@ -39,7 +39,7 @@ public class AutonomousController(
     [Authorize(Roles = "Admin,Manager")]
     public async Task<ActionResult<object>> Run()
     {
-        var organization = await db.Organizations.FirstAsync();
+        var organization = await db.GetCurrentOrganizationAsync();
         var summary = await monitor.RunAllAsync(organization);
         var duplicatesCreated = await duplicates.ScanAsync();
         return Ok(new
@@ -67,7 +67,7 @@ public class AutonomousController(
     [HttpGet("settings")]
     public async Task<ActionResult<SettingsDto>> GetSettings()
     {
-        var organization = await db.Organizations.FirstAsync();
+        var organization = await db.GetCurrentOrganizationAsync();
         return Ok(ToDto(organization));
     }
 
@@ -75,7 +75,7 @@ public class AutonomousController(
     [Authorize(Roles = "Admin,Manager")]
     public async Task<ActionResult<SettingsDto>> UpdateSettings(UpdateSettingsRequest request)
     {
-        var organization = await db.Organizations.FirstAsync();
+        var organization = await db.GetCurrentOrganizationAsync();
         organization.AutonomousEnabled = request.AutonomousEnabled ?? organization.AutonomousEnabled;
         organization.AutoRouteLeads = request.AutoRouteLeads ?? organization.AutoRouteLeads;
         organization.StaleDealDays = Math.Clamp(request.StaleDealDays ?? organization.StaleDealDays, 3, 365);

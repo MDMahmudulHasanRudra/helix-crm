@@ -3,6 +3,7 @@
     <Project Path="src/HelixCrm.Api/HelixCrm.Api.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/HelixCrm.IntegrationTests/HelixCrm.IntegrationTests.csproj" />
     <Project Path="tests/HelixCrm.Tests/HelixCrm.Tests.csproj" />
   </Folder>
 </Solution>

@@ -313,7 +313,7 @@ public class AutonomousMonitor(HelixDbContext db, LeadAutopilot leadAutopilot)
     public async Task<AutonomousInsights> GetInsightsAsync()
     {
         var now = DateTime.UtcNow;
-        var organization = await db.Organizations.FirstAsync();
+        var organization = await db.GetCurrentOrganizationAsync();
         var threshold = organization.LeadScoreRoutingThreshold;
 
         var stalled = await db.Deals.AsNoTracking()

@@ -122,4 +122,46 @@ public class HelixDbContextTests
             Assert.Equal(0, await db.AuditLogs.CountAsync());
         }
     }
+
+    [Fact]
+    public async Task GetCurrentOrganization_ReturnsTheTenantWorkspace_NotTheFirstRow()
+    {
+        var orgA = Guid.NewGuid();
+        var orgB = Guid.NewGuid();
+        var database = Guid.NewGuid().ToString();
+
+        await using (var db = CreateContext(database, new FakeTenant(orgA)))
+        {
+            db.Organizations.Add(new Organization { Id = orgA, Name = "First workspace", Slug = "first" });
+            db.Organizations.Add(new Organization { Id = orgB, Name = "Second workspace", Slug = "second" });
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = CreateContext(database, new FakeTenant(orgB)))
+        {
+            var organization = await db.GetCurrentOrganizationAsync();
+            Assert.Equal(orgB, organization.Id);
+            Assert.Equal("Second workspace", organization.Name);
+        }
+    }
+
+    [Fact]
+    public async Task GetCurrentOrganization_RejectsRequestsWithoutTenantContext()
+    {
+        var database = Guid.NewGuid().ToString();
+        await using var db = CreateContext(database, new FakeTenant(Guid.Empty));
+
+        var ex = await Assert.ThrowsAsync<HelixCrm.Api.Common.ApiException>(() => db.GetCurrentOrganizationAsync());
+        Assert.Equal(401, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetCurrentOrganization_ReturnsNotFoundWhenTheWorkspaceIsMissing()
+    {
+        var database = Guid.NewGuid().ToString();
+        await using var db = CreateContext(database, new FakeTenant(Guid.NewGuid()));
+
+        var ex = await Assert.ThrowsAsync<HelixCrm.Api.Common.ApiException>(() => db.GetCurrentOrganizationAsync());
+        Assert.Equal(404, ex.StatusCode);
+    }
 }

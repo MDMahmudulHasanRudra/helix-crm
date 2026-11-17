@@ -167,7 +167,7 @@ public class LeadsController(HelixDbContext db, IAutomationEngine automation, Le
         };
 
         await autopilot.ApplyScoreAsync(lead);
-        var organization = await db.Organizations.FirstAsync();
+        var organization = await db.GetCurrentOrganizationAsync();
         await autopilot.ApplyRoutingAsync(lead, organization, User.GetUserId(), request.OwnerId is not null);
 
         db.Leads.Add(lead);
@@ -366,7 +366,7 @@ public class LeadsController(HelixDbContext db, IAutomationEngine automation, Le
 
         var orgId = User.GetOrganizationId();
         var userId = User.GetUserId();
-        var organization = await db.Organizations.FirstAsync();
+        var organization = await db.GetCurrentOrganizationAsync();
 
         foreach (var row in rows)
         {

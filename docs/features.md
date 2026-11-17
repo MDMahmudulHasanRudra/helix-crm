@@ -11,7 +11,7 @@ Status legend: **✔ shipped** · **◐ partial** (core flow present, advanced e
 | Leads | ✔ | Table + kanban by status, score, estimated value, source, qualification notes |
 | Lead conversion | ✔ | Creates/links account, contact and deal, records conversion audit |
 | Deals | ✔ | Configurable pipelines, kanban drag, table view, probability, close date, won/lost |
-| Activities | ✔ | Tasks, calls, meetings, emails, notes, replies; due buckets; complete/reopen |
+| Activities | ✔ | Tasks, calls, meetings, manually logged emails, notes, replies; due buckets; complete/reopen |
 | Products | ✔ | SKU, price, tax rate, category, active flag |
 | Quotes | ✔ | Line items, product picker, per-line discount, order discount, tax, status workflow, print view |
 | CSV export | ✔ | Accounts, contacts, leads, deals, tickets, quotes, invoices |
@@ -50,7 +50,7 @@ Status legend: **✔ shipped** · **◐ partial** (core flow present, advanced e
 | --- | --- | --- |
 | Shared ticket inbox | ✔ | Table + board, search, status/priority/channel/assignee filters |
 | Conversation thread | ✔ | Chronological replies and internal notes with author and timestamp |
-| Public reply vs internal note | ✔ | Replies are visible to customers conceptually; notes stay internal; both are auto-logged to the global activity stream |
+| Public reply vs internal note | ◐ | The thread distinguishes public replies from internal notes, but replies are **not delivered by email yet** — nothing leaves the app. Both are auto-logged to the global activity stream |
 | Visible SLA breach & escalation state | ✔ | Server-side breach flag and escalation level are shown in the inbox and ticket detail |
 | Assignment & status workflow | ✔ | Open → Pending → Resolved → Closed with timestamps |
 | Ticket ↔ account/contact link | ✔ | Shown on both profiles |
@@ -62,7 +62,8 @@ Status legend: **✔ shipped** · **◐ partial** (core flow present, advanced e
 | Capability | Helix | Notes |
 | --- | --- | --- |
 | Auth & sessions | ✔ | Cookie JWT, Bearer support, login/logout, password change, session info |
-| Multi-tenancy | ✔ | Row-level global filters, org-scoped every query |
+| Sign-in protection | ✔ | Per-IP fixed-window rate limit on login plus a 5-attempt / 15-minute account lockout; failures are not written to the audit log |
+| Multi-tenancy | ✔ | Row-level global filters; `Organization` lookups are explicitly scoped through `HelixDbContext.GetCurrentOrganizationAsync` |
 | Roles | ✔ | Admin, Manager, Rep with endpoint-level gates |
 | Team management | ✔ | Invite, role change, deactivate/reactivate, remove, avatar initials |
 | Audit trail | ✔ | Created/updated/deleted with field diffs, actor and timestamp |
@@ -75,10 +76,15 @@ Status legend: **✔ shipped** · **◐ partial** (core flow present, advanced e
 | CSV exports | ✔ | RFC 4180 with BOM |
 | API reference | ✔ | Scalar UI + OpenAPI document |
 | Docker packaging | ✔ | Compose with db/api/web; health-checked database |
-| Tests | ◐ | Unit tests for helpers, domain persistence, similarity matching, lead scoring and autonomous workflows; no browser E2E yet |
+| Tests | ✔ | 58 unit tests plus a PostgreSQL integration suite (tenancy, duplicate merge, lead conversion) that runs when `HELIX_TEST_POSTGRES` is set; no browser E2E yet |
 
 ## Deliberate gaps (roadmap)
 
+- Outbound email delivery and inbound email ingestion (SMTP/IMAP/webhook, message-id threading) — tickets, quotes and follow-ups do not send mail yet
+- Lead capture endpoints, per-organisation API keys and outbound webhooks
+- Quote/invoice PDF delivery, public view links, accept/decline and payment links
+- File attachments on records
+- Ownership-based record visibility for reps
 - Email/calendar sync and sequence automation
 - Conditional workflow rules and approval chains
 - Document storage and e-signature
